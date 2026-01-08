@@ -1491,10 +1491,7 @@ func (qb *QueryBuilder) SearchObjectsQuery(searchTerm string, searchInCode bool,
 			}
 		}
 
-		typeInClause := "'" + sqlTypes[0] + "'"
-		for i := 1; i < len(sqlTypes); i++ {
-			typeInClause += ", '" + sqlTypes[i] + "'"
-		}
+		typeInClause := "'" + strings.Join(sqlTypes, "', '") + "'"
 
 		searchInCodeClause := ""
 		if searchInCode {

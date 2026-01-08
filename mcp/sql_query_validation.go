@@ -6,6 +6,32 @@ import (
 	"strings"
 )
 
+// Query validation constants
+const (
+	MaxQueryLength       = 10000 // 10KB - reduced from 50KB for DoS prevention
+	MaxSubqueryCount     = 10
+	MaxUnionCount        = 5
+	MaxParenthesesDepth  = 20
+	MaxHexEncodingCount  = 3
+	MaxCharFunctionCount = 10
+)
+
+// Precompiled regexes for performance
+var (
+	reLineComments     = regexp.MustCompile(`--[^\n]*`)
+	reBlockComments    = regexp.MustCompile(`/\*.*?\*/`)
+	reMultipleSpaces   = regexp.MustCompile(`\s+`)
+	reParensAndCommas  = regexp.MustCompile(`\s*([(),;])\s*`)
+	reSingleQuotes     = regexp.MustCompile(`'[^']*'`)
+	reDoubleQuotes     = regexp.MustCompile(`"[^"]*"`)
+	reSquareBrackets   = regexp.MustCompile(`\[[^\]]*\]`)
+	reKeywordBoundary  = regexp.MustCompile(`\b%s\b`)
+	reSelectInto       = regexp.MustCompile(`SELECT\s+.*\s+INTO\s+`)
+	reHexPattern       = regexp.MustCompile(`0X[0-9A-F]+`)
+	reCharNCharPattern = regexp.MustCompile(`(CHAR|NCHAR)\s*\(`)
+	reValidIdentifier  = regexp.MustCompile(`^[a-zA-Z0-9_#@$]+$`)
+)
+
 // Structure for SQL analysis
 type SQLValidator struct {
 	query      string
@@ -22,16 +48,16 @@ func NewSQLValidator(query string) *SQLValidator {
 // Normalizes SQL by removing extra spaces and comments while maintaining structure.
 func normalizeSQL(sql string) string {
 	// Remove line comments (-- )
-	sql = regexp.MustCompile(`--[^\n]*`).ReplaceAllString(sql, " ")
+	sql = reLineComments.ReplaceAllString(sql, " ")
 
 	// Remove block comments (/* */)
-	sql = regexp.MustCompile(`/\*.*?\*/`).ReplaceAllString(sql, " ")
+	sql = reBlockComments.ReplaceAllString(sql, " ")
 
 	// Normalize multiple spaces
-	sql = regexp.MustCompile(`\s+`).ReplaceAllString(sql, " ")
+	sql = reMultipleSpaces.ReplaceAllString(sql, " ")
 
 	// Remove spaces before/after parentheses and commas
-	sql = regexp.MustCompile(`\s*([(),;])\s*`).ReplaceAllString(sql, "$1")
+	sql = reParensAndCommas.ReplaceAllString(sql, "$1")
 
 	return strings.TrimSpace(strings.ToUpper(sql))
 }
@@ -39,13 +65,13 @@ func normalizeSQL(sql string) string {
 // Remove literal strings for command parsing
 func removeStringLiterals(sql string) string {
 	// Remove strings enclosed in single quotes
-	sql = regexp.MustCompile(`'[^']*'`).ReplaceAllString(sql, "''")
+	sql = reSingleQuotes.ReplaceAllString(sql, "''")
 
 	// Remove strings enclosed in double quotes
-	sql = regexp.MustCompile(`"[^"]*"`).ReplaceAllString(sql, `""`)
+	sql = reDoubleQuotes.ReplaceAllString(sql, `""`)
 
 	// Remove strings enclosed in square brackets (SQL Server identifiers)
-	sql = regexp.MustCompile(`\[[^\]]*\]`).ReplaceAllString(sql, "[]")
+	sql = reSquareBrackets.ReplaceAllString(sql, "[]")
 
 	return sql
 }
@@ -58,8 +84,8 @@ func (v *SQLValidator) Validate() error {
 	}
 
 	// 2. Check maximum size (prevent DoS)
-	if len(v.query) > 50000 {
-		return fmt.Errorf("query too long (maximum 50000 characters)")
+	if len(v.query) > MaxQueryLength {
+		return fmt.Errorf("query too long (maximum %d characters)", MaxQueryLength)
 	}
 
 	// 3. Check if it starts with SELECT or WITH
@@ -183,8 +209,8 @@ func (v *SQLValidator) Validate() error {
 	}
 
 	// 19. Check number of subqueries (prevent DoS)
-	if strings.Count(sqlWithoutLiterals, "SELECT") > 10 {
-		return fmt.Errorf("many subqueries (maximum 10)")
+	if strings.Count(sqlWithoutLiterals, "SELECT") > MaxSubqueryCount {
+		return fmt.Errorf("too many subqueries (maximum %d)", MaxSubqueryCount)
 	}
 
 	// 20. Check parenthesis depth (prevent DoS)
@@ -195,10 +221,16 @@ func (v *SQLValidator) Validate() error {
 	return nil
 }
 
+// keywordPatterns caches compiled regex patterns for keyword matching
+var keywordPatterns = make(map[string]*regexp.Regexp)
+
 // Checks if a keyword exists as a complete word (not part of another word)
 func containsKeyword(sql string, keyword string) bool {
-	// Add spaces/delimiters before and after
-	pattern := regexp.MustCompile(`\b` + keyword + `\b`)
+	pattern, exists := keywordPatterns[keyword]
+	if !exists {
+		pattern = regexp.MustCompile(`\b` + keyword + `\b`)
+		keywordPatterns[keyword] = pattern
+	}
 	return pattern.MatchString(sql)
 }
 
@@ -238,26 +270,18 @@ func (v *SQLValidator) validateMultipleStatements() error {
 // Validates that there is no SELECT INTO statement.
 func (v *SQLValidator) validateNoIntoClause(sql string) error {
 	// Search for pattern SELECT ... INTO
-	pattern := regexp.MustCompile(`SELECT\s+.*\s+INTO\s+`)
-	if pattern.MatchString(sql) {
+	if reSelectInto.MatchString(sql) {
 		return fmt.Errorf("SELECT INTO is not allowed")
 	}
 	return nil
 }
 
-// Valida uso de UNION (permitir apenas para queries legítimas)
+// validateUnionUsage validates UNION clause usage (allows only legitimate queries)
 func (v *SQLValidator) validateUnionUsage(sql string) error {
 	// Count UNIONs
 	unionCount := strings.Count(sql, "UNION")
-	if unionCount > 5 {
-		return fmt.Errorf("many UNION clauses (maximum 5)")
-	}
-
-	// Check if there is UNION ALL or just UNION.
-	// (UNION ALL is more common in attacks)
-	if unionCount > 0 {
-		// Allow, but log
-		// You can add logging here
+	if unionCount > MaxUnionCount {
+		return fmt.Errorf("too many UNION clauses (maximum %d)", MaxUnionCount)
 	}
 
 	return nil
@@ -275,18 +299,16 @@ func (v *SQLValidator) validateEncoding() error {
 	// Check for hexadecimal encoding attempts (0x...)
 	if strings.Contains(v.normalized, "0X") {
 		// Allow only in safe contexts (simple comparisons)
-		hexPattern := regexp.MustCompile(`0X[0-9A-F]+`)
-		matches := hexPattern.FindAllString(v.normalized, -1)
-		if len(matches) > 3 {
-			return fmt.Errorf("Excessive use of hexadecimal encoding")
+		matches := reHexPattern.FindAllString(v.normalized, -1)
+		if len(matches) > MaxHexEncodingCount {
+			return fmt.Errorf("excessive use of hexadecimal encoding")
 		}
 	}
 
 	// Check CHAR / NCHAR used to obfuscate commands
-	charPattern := regexp.MustCompile(`(CHAR|NCHAR)\s*\(`)
-	matches := charPattern.FindAllString(v.normalized, -1)
-	if len(matches) > 10 {
-		return fmt.Errorf("Excessive use of CHAR/NCHAR (possible obfuscation)")
+	matches := reCharNCharPattern.FindAllString(v.normalized, -1)
+	if len(matches) > MaxCharFunctionCount {
+		return fmt.Errorf("excessive use of CHAR/NCHAR (possible obfuscation)")
 	}
 
 	return nil
@@ -327,8 +349,8 @@ func (v *SQLValidator) validateParenthesesDepth() error {
 		return fmt.Errorf("unbalanced parentheses")
 	}
 
-	if maxDepth > 20 {
-		return fmt.Errorf("very large parenthesis depth (maximum 20)")
+	if maxDepth > MaxParenthesesDepth {
+		return fmt.Errorf("parenthesis depth too large (maximum %d)", MaxParenthesesDepth)
 	}
 
 	return nil
