@@ -44,7 +44,7 @@ func (s *DatabaseMCP) toolListFunctions() (mcp.Tool, server.ToolHandlerFunc) {
 }
 
 func (s *DatabaseMCP) handleListFunctions(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	args, ok := request.Params.Arguments.(map[string]interface{})
+	args, ok := getArgs(request.Params.Arguments)
 	if !ok {
 		return mcp.NewToolResultError("Invalid arguments"), nil
 	}
@@ -60,34 +60,10 @@ func (s *DatabaseMCP) handleListFunctions(ctx context.Context, request mcp.CallT
 	}
 
 	// Name filter (optional)
-	nameFilter := ""
-	if nameVal, ok := args["name_filter"].(string); ok {
-		nameFilter = nameVal
-	}
+	nameFilter, _ := getStringArg(args, "name_filter")
 
-	// Pagination parameters with default values
-	page := 1
-	pageSize := 100
-
-	if pageVal, ok := args["page"].(float64); ok {
-		page = int(pageVal)
-		if page < 1 {
-			page = 1
-		}
-	}
-
-	if pageSizeVal, ok := args["page_size"].(float64); ok {
-		pageSize = int(pageSizeVal)
-		if pageSize < 1 {
-			pageSize = 100
-		}
-		if pageSize > 500 {
-			pageSize = 500
-		}
-	}
-
-	// Calculate offset
-	offset := (page - 1) * pageSize
+	// Pagination parameters
+	pagination := GetPaginationParams(args, DefaultPageSize, MaxPageSize)
 
 	// Validate function type
 	switch funcType {
@@ -98,7 +74,7 @@ func (s *DatabaseMCP) handleListFunctions(ctx context.Context, request mcp.CallT
 	}
 
 	// Use query builder to generate database-specific query
-	query, queryArgs := s.queryBuilder.ListFunctionsQuery(schema, nameFilter, funcType, pageSize, offset)
+	query, queryArgs := s.queryBuilder.ListFunctionsQuery(schema, nameFilter, funcType, pagination.PageSize, pagination.Offset)
 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -133,9 +109,9 @@ func (s *DatabaseMCP) handleListFunctions(ctx context.Context, request mcp.CallT
 	response := map[string]interface{}{
 		"functions": functions,
 		"pagination": map[string]interface{}{
-			"page":         page,
-			"page_size":    pageSize,
-			"has_previous": page > 1,
+			"page":         pagination.Page,
+			"page_size":    pagination.PageSize,
+			"has_previous": pagination.Page > 1,
 		},
 		"filter": map[string]interface{}{
 			"schema":      schema,
