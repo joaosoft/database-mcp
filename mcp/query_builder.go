@@ -63,6 +63,36 @@ func (qb *QueryBuilder) QualifyTable(schema, tableName string) string {
 }
 
 // -----------------------------------------------------------------------------
+// Pagination Helper
+// -----------------------------------------------------------------------------
+
+// appendPaginationClause appends ORDER BY and pagination to a query
+// orderByClause should contain the full " ORDER BY col1, col2" or just columns "col1, col2"
+func (qb *QueryBuilder) appendPaginationClause(query, orderByClause string, limit, offset int) string {
+	// Extract just the columns from orderByClause if it starts with ORDER BY
+	orderByColumns := strings.TrimSpace(orderByClause)
+	orderByColumns = strings.TrimPrefix(orderByColumns, " ")
+	orderByColumns = strings.TrimPrefix(orderByColumns, "ORDER BY ")
+	orderByColumns = strings.TrimPrefix(orderByColumns, "order by ")
+	orderByColumns = strings.TrimSpace(orderByColumns)
+
+	// For SQL Server and Oracle, ORDER BY must be part of pagination
+	switch qb.driver {
+	case DriverSQLServer, DriverOracle:
+		if orderByColumns == "" {
+			orderByColumns = "(SELECT NULL)"
+		}
+		return query + fmt.Sprintf(" ORDER BY %s OFFSET %d ROWS FETCH NEXT %d ROWS ONLY", orderByColumns, offset, limit)
+	default:
+		// PostgreSQL, MySQL, SQLite use LIMIT/OFFSET without requiring ORDER BY in pagination
+		if orderByColumns != "" {
+			query += " ORDER BY " + orderByColumns
+		}
+		return query + fmt.Sprintf(" LIMIT %d OFFSET %d", limit, offset)
+	}
+}
+
+// -----------------------------------------------------------------------------
 // Feature Support
 // -----------------------------------------------------------------------------
 
@@ -142,7 +172,7 @@ func (qb *QueryBuilder) ListTablesQuery(schemaFilter, nameFilter string, limit, 
 		args = append(args, "%"+qb.dialect.NormalizeIdentifier(nameFilter)+"%")
 	}
 
-	query += meta.OrderBy + " " + qb.dialect.PaginationClause(limit, offset, "")
+	query = qb.appendPaginationClause(query, meta.OrderBy, limit, offset)
 
 	return query, args
 }
@@ -271,7 +301,7 @@ func (qb *QueryBuilder) ListProceduresQuery(schemaFilter, nameFilter string, lim
 		args = append(args, "%"+qb.dialect.NormalizeIdentifier(nameFilter)+"%")
 	}
 
-	query += meta.OrderBy + " " + qb.dialect.PaginationClause(limit, offset, "")
+	query = qb.appendPaginationClause(query, meta.OrderBy, limit, offset)
 
 	return query, args
 }
@@ -326,7 +356,7 @@ func (qb *QueryBuilder) ListFunctionsQuery(schemaFilter, nameFilter, funcType st
 		args = append(args, "%"+qb.dialect.NormalizeIdentifier(nameFilter)+"%")
 	}
 
-	query += meta.OrderBy + " " + qb.dialect.PaginationClause(limit, offset, "")
+	query = qb.appendPaginationClause(query, meta.OrderBy, limit, offset)
 
 	return query, args
 }
@@ -366,7 +396,7 @@ func (qb *QueryBuilder) ListViewsQuery(schemaFilter, nameFilter string, limit, o
 		args = append(args, "%"+qb.dialect.NormalizeIdentifier(nameFilter)+"%")
 	}
 
-	query += meta.OrderBy + " " + qb.dialect.PaginationClause(limit, offset, "")
+	query = qb.appendPaginationClause(query, meta.OrderBy, limit, offset)
 
 	return query, args
 }
@@ -417,7 +447,7 @@ func (qb *QueryBuilder) ListTriggersQuery(schemaFilter, tableName, nameFilter st
 		query += meta.DisabledFilter
 	}
 
-	query += meta.OrderBy + " " + qb.dialect.PaginationClause(limit, offset, "")
+	query = qb.appendPaginationClause(query, meta.OrderBy, limit, offset)
 
 	return query, args
 }
@@ -704,14 +734,8 @@ func (qb *QueryBuilder) BuildSelectQuery(params SelectQueryParams) string {
 	quotedOrderBy := qb.QuoteIdentifier(params.OrderBy)
 	orderClause := fmt.Sprintf("%s %s", quotedOrderBy, params.OrderDirection)
 
-	switch qb.driver {
-	case DriverSQLServer, DriverOracle:
-		return fmt.Sprintf(`SELECT %s FROM %s %s ORDER BY %s OFFSET %d ROWS FETCH NEXT %d ROWS ONLY`,
-			columnsStr, qualifiedTable, params.WhereClause, orderClause, params.Offset, params.Limit)
-	default: // PostgreSQL, MySQL, SQLite
-		return fmt.Sprintf(`SELECT %s FROM %s %s ORDER BY %s LIMIT %d OFFSET %d`,
-			columnsStr, qualifiedTable, params.WhereClause, orderClause, params.Limit, params.Offset)
-	}
+	baseQuery := fmt.Sprintf(`SELECT %s FROM %s %s`, columnsStr, qualifiedTable, params.WhereClause)
+	return qb.appendPaginationClause(baseQuery, orderClause, params.Limit, params.Offset)
 }
 
 // BuildCountQuery builds a COUNT query
