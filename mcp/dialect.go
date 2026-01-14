@@ -189,8 +189,12 @@ func (d *BaseDialect) Driver() DriverType {
 	return d.driver
 }
 
-// NormalizeIdentifier default implementation (no change)
+// NormalizeIdentifier default implementation - strips brackets if present
 func (d *BaseDialect) NormalizeIdentifier(name string) string {
+	// Remove SQL Server style brackets [name] if present
+	if len(name) >= 2 && name[0] == '[' && name[len(name)-1] == ']' {
+		return name[1 : len(name)-1]
+	}
 	return name
 }
 

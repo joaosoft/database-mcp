@@ -36,6 +36,12 @@ func isValidIdentifier(name string) bool {
 	if name == "" || len(name) >= 128 {
 		return false
 	}
+	// Allow bracketed identifiers [name] - SQL Server style escaping
+	if len(name) >= 2 && name[0] == '[' && name[len(name)-1] == ']' {
+		// Extract name inside brackets and validate it allows more chars
+		innerName := name[1 : len(name)-1]
+		return len(innerName) > 0 && reValidIdentifierBracketed.MatchString(innerName)
+	}
 	return reValidIdentifier.MatchString(name)
 }
 

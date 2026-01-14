@@ -51,8 +51,12 @@ func (d *OracleDialect) SystemSchemas() []string {
 	return []string{"SYS", "SYSTEM", "OUTLN", "XDB", "WMSYS", "CTXSYS", "MDSYS", "OLAPSYS"}
 }
 
-// NormalizeIdentifier converts to uppercase for Oracle
+// NormalizeIdentifier converts to uppercase for Oracle, strips brackets if present
 func (d *OracleDialect) NormalizeIdentifier(name string) string {
+	// Remove SQL Server style brackets [name] if present
+	if len(name) >= 2 && name[0] == '[' && name[len(name)-1] == ']' {
+		name = name[1 : len(name)-1]
+	}
 	return strings.ToUpper(name)
 }
 

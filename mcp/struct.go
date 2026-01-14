@@ -39,17 +39,18 @@ var connManager = &ConnectionManager{
 
 // Precompiled regexes for performance
 var (
-	reLineComments     = regexp.MustCompile(`--[^\n]*`)
-	reBlockComments    = regexp.MustCompile(`/\*.*?\*/`)
-	reMultipleSpaces   = regexp.MustCompile(`\s+`)
-	reParensAndCommas  = regexp.MustCompile(`\s*([(),;])\s*`)
-	reSingleQuotes     = regexp.MustCompile(`'[^']*'`)
-	reDoubleQuotes     = regexp.MustCompile(`"[^"]*"`)
-	reSquareBrackets   = regexp.MustCompile(`\[[^\]]*\]`)
-	reSelectInto       = regexp.MustCompile(`SELECT\s+.*\s+INTO\s+`)
-	reHexPattern       = regexp.MustCompile(`0X[0-9A-F]+`)
-	reCharNCharPattern = regexp.MustCompile(`(CHAR|NCHAR)\s*\(`)
-	reValidIdentifier  = regexp.MustCompile(`^[a-zA-Z0-9_#@$]+$`)
+	reLineComments             = regexp.MustCompile(`--[^\n]*`)
+	reBlockComments            = regexp.MustCompile(`/\*.*?\*/`)
+	reMultipleSpaces           = regexp.MustCompile(`\s+`)
+	reParensAndCommas          = regexp.MustCompile(`\s*([(),;])\s*`)
+	reSingleQuotes             = regexp.MustCompile(`'[^']*'`)
+	reDoubleQuotes             = regexp.MustCompile(`"[^"]*"`)
+	reSquareBrackets           = regexp.MustCompile(`\[[^\]]*\]`)
+	reSelectInto               = regexp.MustCompile(`SELECT\s+.*\s+INTO\s+`)
+	reHexPattern               = regexp.MustCompile(`0X[0-9A-F]+`)
+	reCharNCharPattern         = regexp.MustCompile(`(CHAR|NCHAR)\s*\(`)
+	reValidIdentifier          = regexp.MustCompile(`^[a-zA-Z0-9_#@$]+$`)
+	reValidIdentifierBracketed = regexp.MustCompile(`^[a-zA-Z0-9_#@$*\- ]+$`) // Allows more chars inside brackets
 )
 
 // Supported database drivers
